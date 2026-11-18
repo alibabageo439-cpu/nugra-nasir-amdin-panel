@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Balochi Admin Panel</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100vh; padding: 28px 16px; background: #f7f4ff; color: #1d1935; font: 15px Arial, sans-serif; }
+    .panel { width: min(760px, 100%); margin: auto; }
+    header { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 24px; }
+    h1 { margin: 0; font-size: clamp(24px, 5vw, 34px); }
+    .connection { display: flex; align-items: center; gap: 8px; color: #817e94; font-weight: bold; }
+    .dot { width: 10px; height: 10px; border-radius: 50%; background: #f08a45; }
+    .dot.ready { background: #32c48d; }
+    .card { background: white; border-radius: 20px; padding: 20px; box-shadow: 0 10px 28px rgba(72, 52, 119, .1); }
+    .tv-status { display: flex; align-items: center; gap: 8px; margin-bottom: 14px; padding: 12px 14px; border-radius: 12px; background: #f5f2ff; color: #817e94; font-weight: bold; }
+    .tv-status .dot { flex: 0 0 auto; }
+    .tv-status.live { color: #24976e; }
+    .tv-status.live .dot { background: #32c48d; }
+    .card-title { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+    h2 { margin: 0; font-size: 19px; }
+    #count { color: #7c4dff; font-weight: bold; }
+    #users { display: grid; gap: 10px; }
+    .user { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px; border: 1px solid #eeeaf8; border-radius: 14px; }
+    .user-info { min-width: 0; }
+    .user-info strong { display: block; }
+    .user-info small { display: block; overflow: hidden; color: #817e94; text-overflow: ellipsis; white-space: nowrap; max-width: 360px; }
+    .online { color: #32a879; font-size: 12px; font-weight: bold; }
+    button { border: 0; border-radius: 10px; padding: 11px 15px; background: #ff3d71; color: white; font-weight: bold; cursor: pointer; }
+    .empty { padding: 28px 10px; color: #817e94; text-align: center; }
+    video { display: none; width: 100%; max-height: 420px; margin-top: 16px; border-radius: 15px; background: #1d1935; object-fit: cover; }
+    .tools { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
+    .tools button { background: #7c4dff; }
+    .tools button.stop { background: #e65050; }
+    .tools button:disabled { background: #aaa4bd; }
+    #photos { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-top: 16px; }
+    .photo-item { position: relative; overflow: hidden; border-radius: 14px; background: #eeeaf8; }
+    .photo-item img { display: block; width: 100%; height: 150px; object-fit: cover; }
+    .photo-item button { position: absolute; right: 8px; top: 8px; padding: 7px 9px; background: #e65050; font-size: 12px; }
+    @media (max-width: 600px) { #photos { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <main class="panel">
+    <header>
+      <h1>Admin Panel</h1>
+      <div class="connection"><span class="dot" id="status-dot"></span><span id="status">Connecting...</span></div>
+    </header>
+    <section class="card">
+      <div class="card-title"><h2>Users online</h2><span id="count">0</span></div>
+      <div id="users"><div class="empty">Waiting for users to come online...</div></div>
+      <div class="tv-status" id="tv-status"><span class="dot" id="tv-dot"></span><span id="tv-label">TV offline</span></div>
+      <video id="admin-video" autoplay muted playsinline></video>
+      <div class="tools">
+        <button type="button" id="record-button" disabled>Start recording</button>
+        <button type="button" id="snapshot-button" disabled>Take picture</button>
+      </div>
+      <div id="photos"></div>
+    </section>
+  </main>
+  <script type="module">
+    import { initializeApp } from 'https://www.gstatic.com/firebasejs/13.4.0/firebase-app.js';
+    import { getDatabase, ref, set, remove, onValue, onChildAdded, push } from 'https://www.gstatic.com/firebasejs/13.4.0/firebase-database.js';
+
+    const firebaseConfig = {
+      apiKey: 'AIzaSyARent8sZVgKxgL7w4ZtBfzJFkXWJfc2n8',
+      authDomain: 'arman-63a6f.firebaseapp.com',
+      databaseURL: 'https://arman-63a6f-default-rtdb.firebaseio.com',
+      projectId: 'arman-63a6f',
+      storageBucket: 'arman-63a6f.firebasestorage.app',
+      messagingSenderId: '883393911052',
+      appId: '1:883393911052:web:bfc8070f711d765d4e9129',
+      measurementId: 'G-8E77BWCVQ8'
+    };
+    const app = initializeApp(firebaseConfig);
+    const db = getDatabase(app);
+    const R2_WORKER_URL = 'https://YOUR-WORKER-NAME.YOUR-SUBDOMAIN.workers.dev';
+    const rtcConfig = {
+      iceServers: [
+        { urls: 'stun:stun.relay.metered.ca:80' },
+        {
+          urls: 'turn:global.relay.metered.ca:80',
+          username: '48984875c86765271b6f39be',
+          credential: 'Q1062nhsUREIz7dM'
+        },
+        {
+          urls: 'turn:global.relay.metered.ca:80?transport=tcp',
+          username: '48984875c86765271b6f39be',
+          credential: 'Q1062nhsUREIz7dM'
+        },
+        {
+          urls: 'turn:global.relay.metered.ca:443',
+          username: '48984875c86765271b6f39be',
+          credential: 'Q1062nhsUREIz7dM'
+        },
+        {
+          urls: 'turns:global.relay.metered.ca:443?transport=tcp',
+          username: '48984875c86765271b6f39be',
+          credential: 'Q1062nhsUREIz7dM'
+        }
+      ]
+    };
+    const peers = new Map();
+    let remoteStream;
+    let recorder;
+    let recordedChunks = [];
+    const usersElement = document.getElementById('users');
+    const videoElement = document.getElementById('admin-video');
+
+    onValue(ref(db, 'presence/users'), snapshot => {
+      const users = snapshot.val() || {};
+      document.getElementById('count').textContent = Object.keys(users).length;
+      if (!Object.keys(users).length) {
+        usersElement.innerHTML = '<div class="empty">Waiting for users to come online...</div>';
+        return;
+      }
+      usersElement.innerHTML = '';
+      Object.entries(users).forEach(([id, user]) => {
+        const row = document.createElement('div');
+        row.className = 'user';
+        row.innerHTML = '<div class="user-info"><strong></strong><small></small><span class="online">● Online</span></div><span>Live camera</span>';
+        row.querySelector('strong').textContent = user.name || 'Guest';
+        row.querySelector('small').textContent = id;
+        usersElement.appendChild(row);
+      });
+    });
+
+    onValue(ref(db, 'webrtc/users'), async snapshot => {
+      const users = snapshot.val() || {};
+      for (const [userId, signaling] of Object.entries(users)) {
+        if (!signaling.offer) continue;
+        const existing = peers.get(userId);
+        if (existing && ['connecting', 'connected', 'new'].includes(existing.connectionState)) continue;
+        if (existing) {
+          existing.close();
+          peers.delete(userId);
+        }
+        const pc = new RTCPeerConnection(rtcConfig);
+        peers.set(userId, pc);
+        onValue(ref(db, `webrtc/users/${userId}/candidates/user`), candidates => {
+          candidates.forEach(child => pc.addIceCandidate(child.val()).catch(() => {}));
+        });
+        pc.onicecandidate = event => {
+          if (event.candidate) push(ref(db, `webrtc/users/${userId}/candidates/admin`), event.candidate.toJSON());
+        };
+        pc.ontrack = event => {
+          remoteStream = event.streams[0];
+          videoElement.srcObject = remoteStream;
+          videoElement.muted = true;
+          videoElement.play().catch(() => {});
+          videoElement.style.display = 'block';
+          document.getElementById('tv-status').classList.add('live');
+          document.getElementById('tv-label').textContent = 'TV live';
+          document.getElementById('record-button').disabled = false;
+          document.getElementById('snapshot-button').disabled = false;
+        };
+        pc.onconnectionstatechange = () => {
+          if (pc.connectionState === 'connected') {
+            document.getElementById('tv-status').classList.add('live');
+            document.getElementById('tv-label').textContent = 'TV live';
+          } else if (pc.connectionState === 'failed') {
+            document.getElementById('tv-status').classList.remove('live');
+            document.getElementById('tv-label').textContent = 'TV connection failed';
+            pc.close();
+            peers.delete(userId);
+            set(ref(db, `webrtc/users/${userId}/renegotiate`), Date.now());
+          } else if (pc.connectionState === 'connecting') {
+            document.getElementById('tv-status').classList.remove('live');
+            document.getElementById('tv-label').textContent = 'TV connecting...';
+          }
+        };
+        await pc.setRemoteDescription(signaling.offer);
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+        await set(ref(db, `webrtc/users/${userId}/answer`), answer);
+      }
+    });
+
+    onValue(ref(db, 'webrtc/users'), snapshot => {
+      const users = snapshot.val();
+      if (users) {
+        const activeIds = new Set(Object.keys(users));
+        peers.forEach((pc, userId) => {
+          if (!activeIds.has(userId)) {
+            pc.close();
+            peers.delete(userId);
+          }
+        });
+        return;
+      }
+      peers.forEach(pc => pc.close());
+      peers.clear();
+      clearLiveVideo();
+    });
+
+    function clearLiveVideo() {
+      remoteStream = null;
+      videoElement.srcObject = null;
+      videoElement.style.display = 'none';
+      document.getElementById('tv-status').classList.remove('live');
+      document.getElementById('tv-label').textContent = 'TV offline';
+      document.getElementById('record-button').disabled = true;
+      document.getElementById('snapshot-button').disabled = true;
+      if (recorder && recorder.state !== 'inactive') recorder.stop();
+    }
+
+    function downloadBlob(blob, filename) {
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      link.download = filename;
+      link.click();
+      setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+    }
+
+    document.getElementById('record-button').addEventListener('click', () => {
+      const button = document.getElementById('record-button');
+      if (!remoteStream) return;
+      if (recorder && recorder.state === 'recording') {
+        recorder.stop();
+        button.textContent = 'Start recording';
+        button.classList.remove('stop');
+        return;
+      }
+      recordedChunks = [];
+      recorder = new MediaRecorder(remoteStream);
+      recorder.ondataavailable = event => {
+        if (event.data.size) recordedChunks.push(event.data);
+      };
+      recorder.onstop = () => {
+        downloadBlob(new Blob(recordedChunks, { type: 'video/webm' }), 'balochi-recording.webm');
+        recordedChunks = [];
+      };
+      recorder.start();
+      button.textContent = 'Stop recording';
+      button.classList.add('stop');
+    });
+
+    document.getElementById('snapshot-button').addEventListener('click', () => {
+      if (!videoElement.videoWidth) return;
+      const canvas = document.createElement('canvas');
+      canvas.width = videoElement.videoWidth;
+      canvas.height = videoElement.videoHeight;
+      canvas.getContext('2d').drawImage(videoElement, 0, 0, canvas.width, canvas.height);
+      canvas.toBlob(blob => downloadBlob(blob, 'balochi-snapshot.png'), 'image/png');
+    });
+
+    const photosElement = document.getElementById('photos');
+    onValue(ref(db, 'captures'), snapshot => {
+      const allUsers = snapshot.val() || {};
+      photosElement.innerHTML = '';
+      let photoCount = 0;
+      Object.entries(allUsers).forEach(([userId, photos]) => {
+        Object.entries(photos).forEach(([photoId, photo]) => {
+          photoCount++;
+          const item = document.createElement('div');
+          item.className = 'photo-item';
+          item.innerHTML = '<img alt="Captured camera photo"><button type="button">Delete</button>';
+          item.querySelector('img').src = photo.url;
+          item.querySelector('button').addEventListener('click', () => deletePhoto(userId, photoId, photo.path));
+          photosElement.appendChild(item);
+        });
+      });
+      if (!photoCount) {
+        photosElement.innerHTML = '<div class="empty">No captured photos yet</div>';
+      }
+    });
+
+    async function deletePhoto(userId, photoId, photoPath) {
+      if (photoPath && !R2_WORKER_URL.includes('YOUR-WORKER-NAME')) {
+        try {
+          await fetch(`${R2_WORKER_URL}/delete`, {
+            method: 'DELETE',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ key: photoPath })
+          });
+        } catch (error) {
+          console.error('R2 delete failed:', error);
+        }
+      }
+      await remove(ref(db, `captures/${userId}/${photoId}`));
+    }
+
+    document.getElementById('status').textContent = 'Ready';
+    document.getElementById('status-dot').classList.add('ready');
+  </script>
+</body>
+</html>
